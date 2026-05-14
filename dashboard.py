@@ -15,6 +15,7 @@ import memory
 
 DB = os.getenv("DB_PATH", "adam.db")
 state.init(DB)
+memory.init()  # ensure all tables exist
 
 app = FastAPI(title="Adam Dashboard")
 templates = Jinja2Templates(directory=str(_ROOT / "templates"))
@@ -68,6 +69,28 @@ async def get_agents():
         },
         "outcomes": mem.get_outcomes(10),
     })
+
+
+@app.get("/api/status")
+async def get_status():
+    """Returns system status - useful to verify Adam is running."""
+    import sqlite3
+    try:
+        with sqlite3.connect(DB) as c:
+            bets    = c.execute("SELECT COUNT(*) FROM bets").fetchone()[0]
+            pending = c.execute("SELECT COUNT(*) FROM bets WHERE status='pending'").fetchone()[0]
+            last_log = c.execute("SELECT ts,message FROM log ORDER BY id DESC LIMIT 1").fetchone()
+            last_agent = c.execute("SELECT agent,ts,message FROM agent_log ORDER BY id DESC LIMIT 1").fetchone()
+        return JSONResponse({
+            "status":       "running",
+            "total_bets":   bets,
+            "pending_bets": pending,
+            "last_log":     {"ts": last_log[0], "msg": last_log[1]} if last_log else None,
+            "last_agent":   {"agent": last_agent[0], "ts": last_agent[1], "msg": last_agent[2]} if last_agent else None,
+            "db":           DB,
+        })
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
 
 
 @app.get("/health")
