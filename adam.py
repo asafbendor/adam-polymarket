@@ -186,7 +186,10 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
             err = result.get("message","")
             logger.warning(f"Bet failed: {err} | {opp.get('question','')[:60]}")
             state.log("WARNING", f"Bet failed: {err}", DB)
-            # Don't notify user on every failure - Trader handles retries internally
+            await telegram.send(
+                f"<b>Bet failed</b>\n{opp.get('question','')[:100]}\n"
+                f"Error: {err[:200]}\nTrader is self-healing..."
+            )
 
 
 async def main():

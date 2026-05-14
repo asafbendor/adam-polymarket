@@ -134,9 +134,25 @@ class TraderAgent:
             from py_clob_client_v2.clob_types import OrderArgs
             from py_clob_client_v2.order_builder.constants import BUY
             args = OrderArgs(token_id=token_id, price=round(price,2), size=size, side=BUY)
-            resp = self._client.create_and_post_order(
-                args, options={"tick_size":"0.01","neg_risk":neg_risk}
-            )
+
+            # py_clob_client_v2 expects an object with attributes, not a dict
+            options = None
+            for cls_name in ["PartialCreateOrderOptions", "CreateOrderOptions",
+                             "OrderOptions", "TradeParams"]:
+                try:
+                    mod = __import__("py_clob_client_v2.clob_types",
+                                     fromlist=[cls_name])
+                    cls = getattr(mod, cls_name, None)
+                    if cls:
+                        options = cls(tick_size="0.01", neg_risk=neg_risk)
+                        break
+                except Exception:
+                    continue
+            if options is None:
+                from types import SimpleNamespace
+                options = SimpleNamespace(tick_size="0.01", neg_risk=neg_risk)
+
+            resp = self._client.create_and_post_order(args, options)
             order_id = ""
             if isinstance(resp,dict):
                 order_id = (resp.get("orderID") or resp.get("order_id") or
