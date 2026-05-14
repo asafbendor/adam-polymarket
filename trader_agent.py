@@ -94,18 +94,28 @@ class TraderAgent:
         self._key   = os.getenv("POLYMARKET_PRIVATE_KEY","").strip().lstrip("=")
         self._proxy = os.getenv("POLYMARKET_PROXY_ADDRESS","").strip().lstrip("=")
         self._client = None
-        self._working_config = None  # stores what actually worked
-        # Try all combinations until one works
-        for sig_type in [0, 1, 2]:
-            for use_creds in [False, True]:
-                if self._init_client(sig_type=sig_type, use_creds=use_creds):
-                    self._working_config = {"sig_type": sig_type, "use_creds": use_creds}
-                    memory.remember("trader", "working_sig_type", str(sig_type))
-                    memory.remember("trader", "working_use_creds", str(use_creds))
-                    logger.warning(f"Trader init OK: sig_type={sig_type} use_creds={use_creds}")
-                    break
-            if self._working_config:
-                break
+        # Initialize with sig_type=0 and credentials from old client
+        self._init_client(sig_type=0, use_creds=True)
+        memory.remember("trader", "init_strategy", "sig_type=0 + old client creds derivation")
+
+    def _get_creds_via_old_client(self):
+        """Use py-clob-client v0.34.6 to derive API credentials (known working)."""
+        try:
+            from py_clob_client.client import ClobClient as OldClient
+            from py_clob_client.constants import POLYGON as OLD_POLYGON
+            old = OldClient(
+                host="https://clob.polymarket.com",
+                key=self._key,
+                chain_id=OLD_POLYGON,
+                signature_type=2,
+                funder=self._proxy,
+            )
+            creds = old.create_or_derive_api_creds()
+            logger.warning(f"Creds derived via old client: {getattr(creds,'api_key','?')[:8]}...")
+            return creds
+        except Exception as e:
+            logger.warning(f"Old client creds failed: {e}")
+            return None
 
     def _init_client(self, sig_type: int = 0, use_creds: bool = True):
         try:
@@ -119,19 +129,33 @@ class TraderAgent:
                 funder=self._proxy,
             )
             if use_creds:
+                # First try V2 native methods
+                creds = None
                 for method in ["create_or_derive_api_creds","derive_api_creds",
-                               "get_or_create_api_creds","create_api_key"]:
+                               "get_or_create_api_creds"]:
                     fn = getattr(self._client, method, None)
                     if fn:
                         try:
                             creds = fn()
                             if creds:
-                                try: self._client.set_api_creds(creds)
-                                except Exception: pass
-                                logger.info(f"Creds set via {method}")
+                                logger.info(f"V2 creds via {method}")
                                 break
                         except Exception as e:
-                            logger.debug(f"{method}: {e}")
+                            logger.debug(f"V2 {method}: {e}")
+
+                # Fallback: use old client to derive creds
+                if not creds:
+                    creds = self._get_creds_via_old_client()
+
+                if creds:
+                    try:
+                        self._client.set_api_creds(creds)
+                        logger.warning(f"Creds set on V2 client OK")
+                    except Exception as e:
+                        logger.warning(f"set_api_creds failed: {e}")
+                else:
+                    logger.warning("No creds available - orders will fail auth")
+
             logger.warning(f"Client init OK with sig_type={sig_type}")
             return True
         except Exception as e:
