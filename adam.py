@@ -63,6 +63,78 @@ async def _check_resolution(session: aiohttp.ClientSession, cid: str) -> tuple[b
     return False, ""
 
 
+async def _binance_fallback(session: aiohttp.ClientSession) -> list[dict]:
+    """Direct Binance price comparison - no Claude needed. Pure math."""
+    from scout_agent import _fetch_markets, _TICKERS
+    import re as _re
+
+    markets = await _fetch_markets(session)
+    opps = []
+    BINANCE = "https://api.binance.com/api/v3/ticker/price"
+
+    for m in markets:
+        q = m["question"]
+        # Find ticker
+        sym = None
+        for alias, s in _TICKERS.items():
+            if alias in q.lower():
+                sym = s; break
+        if not sym:
+            continue
+        # Find target price
+        pm = _re.search(r"\$\s*([\d,]+(?:\.\d+)?)\s*([kK]?)", q)
+        if not pm:
+            continue
+        target = float(pm.group(1).replace(",",""))
+        if pm.group(2).lower() == "k":
+            target *= 1000
+
+        # Get Binance price
+        try:
+            async with session.get(BINANCE, params={"symbol":sym},
+                                   timeout=aiohttp.ClientTimeout(total=8)) as r:
+                if r.status != 200: continue
+                current = float((await r.json(content_type=None))["price"])
+        except Exception:
+            continue
+
+        # Calculate direction and probability
+        above_words = ["above","exceed","over","higher","surpass","reach","close above",">"]
+        below_words = ["below","under","less than","drop below","fall below","<"]
+        q_low = q.lower()
+        direction = "above" if any(w in q_low for w in above_words) else "below"
+
+        margin = (current - target)/target if direction=="above" else (target - current)/target
+
+        if margin >= 0.20: prob = 0.93
+        elif margin >= 0.12: prob = 0.87
+        elif margin >= 0.06: prob = 0.78
+        else: continue  # not enough margin
+
+        mp = m["yes_price"] if direction=="above" else m["no_price"]
+        bet_dir = "YES" if direction=="above" else "NO"
+        token_id = m["yes_token_id"] if bet_dir=="YES" else m["no_token_id"]
+        edge = prob - mp
+
+        if edge < 0.05: continue
+
+        opps.append({
+            "condition_id":   m["condition_id"],
+            "question":       q,
+            "direction":      bet_dir,
+            "token_id":       token_id,
+            "market_price":   mp,
+            "estimated_prob": prob,
+            "reason":         f"{sym.replace('USDT','')} at ${current:,.0f}, target ${target:,.0f}, margin {margin*100:.0f}%",
+            "neg_risk":       m["neg_risk"],
+            "market_url":     m["market_url"],
+            "end_date":       m["end_date"],
+        })
+
+    logger.info(f"Binance fallback found {len(opps)} opportunities")
+    return opps
+
+
 async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
     today        = state.today()
     stats        = state.get_daily(today, DB)
@@ -70,6 +142,7 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
 
     logger.info(f"Cycle start | budget_left=${budget_left:.2f}")
     memory.agent_log("adam", f"Cycle start | budget=${budget_left:.2f}")
+    state.log("INFO", f"Cycle start | budget_left=${budget_left:.2f}", DB)
 
     # 1. Check resolved bets
     for bet in state.get_pending(DB):
@@ -125,8 +198,15 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
     opps = await find_opportunities(session)
     memory.agent_log("adam", f"Scout returned {len(opps)} opportunities")
 
+    # Fallback: if Scout found nothing, use direct Binance price comparison
     if not opps:
-        logger.info("Scout found no opportunities this cycle")
+        logger.info("Scout found 0 via Claude - trying direct Binance fallback")
+        state.log("INFO", "Scout found 0, trying Binance fallback", DB)
+        opps = await _binance_fallback(session)
+
+    state.log("INFO", f"Total opportunities: {len(opps)}", DB)
+    if not opps:
+        logger.info("No opportunities this cycle")
         return
 
     # 3. Trader places bets

@@ -94,7 +94,9 @@ class TraderAgent:
         self._key   = os.getenv("POLYMARKET_PRIVATE_KEY","").strip().lstrip("=")
         self._proxy = os.getenv("POLYMARKET_PROXY_ADDRESS","").strip().lstrip("=")
         self._client = None
-        self._init_client(sig_type=0, use_creds=True)
+        # Try sig_type=1 (POLY_PROXY for V2), fallback to 0 (EOA)
+        if not self._init_client(sig_type=1, use_creds=True):
+            self._init_client(sig_type=0, use_creds=True)
 
     def _init_client(self, sig_type: int = 0, use_creds: bool = True):
         try:
@@ -121,9 +123,10 @@ class TraderAgent:
                                 break
                         except Exception as e:
                             logger.debug(f"{method}: {e}")
+            logger.warning(f"Client init OK with sig_type={sig_type}")
             return True
         except Exception as e:
-            logger.error(f"Client init failed: {e}")
+            logger.warning(f"Client init failed sig_type={sig_type}: {e}")
             return False
 
     def _try_order(self, token_id: str, price: float, size: float,

@@ -6,11 +6,12 @@
 <title>Adam Dashboard</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0f1117;--card:#1a1d2e;--border:#2a2d3e;--text:#e2e8f0;--muted:#94a3b8;
---green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--blue:#3b82f6;--accent:#6366f1}
+:root{--bg:#f8fafc;--card:#ffffff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;
+--green:#16a34a;--red:#dc2626;--yellow:#d97706;--blue:#2563eb;--accent:#6366f1}
 body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;font-size:14px}
 header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 24px;
-  display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+  display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;
+  box-shadow:0 1px 3px rgba(0,0,0,.06)}
 header h1{font-size:18px;font-weight:700} header h1 span{color:var(--accent)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);
   margin-right:6px;animation:pulse 2s infinite}
@@ -56,6 +57,8 @@ tr:hover td{background:rgba(99,102,241,.05)}
 .log-row{padding:6px 14px;border-bottom:1px solid var(--border);display:grid;
   grid-template-columns:170px 70px 1fr;gap:10px}
 .log-ts{color:var(--muted)}.log-INFO{color:var(--blue)}.log-WARNING{color:var(--yellow)}.log-ERROR{color:var(--red)}
+.tbl-wrap{box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card{box-shadow:0 1px 3px rgba(0,0,0,.05)}
 .log-msg{word-break:break-word}
 .empty{text-align:center;color:var(--muted);padding:32px}
 footer{text-align:center;color:var(--muted);font-size:12px;padding:24px}
