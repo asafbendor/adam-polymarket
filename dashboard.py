@@ -11,6 +11,7 @@ _ROOT = Path(__file__).resolve().parent
 os.chdir(_ROOT)
 sys.path.insert(0, str(_ROOT))
 import state
+import memory
 
 DB = os.getenv("DB_PATH", "adam.db")
 state.init(DB)
@@ -43,6 +44,30 @@ async def get_bets(limit: int = 100):
 @app.get("/api/log")
 async def get_log(limit: int = 60):
     return JSONResponse({"log": state.get_log(limit, DB)})
+
+
+@app.get("/api/agents")
+async def get_agents():
+    import memory as mem
+    return JSONResponse({
+        "scout": {
+            "name":      "Scout Agent",
+            "role":      "Finds betting opportunities using Claude Haiku + Binance prices",
+            "learnings": mem.recall_all("scout"),
+            "log":       [dict(r) for r in __import__('sqlite3').connect(DB).execute(
+                "SELECT ts,message FROM agent_log WHERE agent='scout' ORDER BY id DESC LIMIT 20"
+            ).fetchall()],
+        },
+        "trader": {
+            "name":   "Trader Agent",
+            "role":   "Places orders via Polymarket CLOB V2, self-heals on errors",
+            "fixes":  mem.recall_all("trader"),
+            "log":    [dict(r) for r in __import__('sqlite3').connect(DB).execute(
+                "SELECT ts,message FROM agent_log WHERE agent='trader' ORDER BY id DESC LIMIT 20"
+            ).fetchall()],
+        },
+        "outcomes": mem.get_outcomes(10),
+    })
 
 
 @app.get("/health")

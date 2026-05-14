@@ -12,7 +12,9 @@ This means it fixes order_version_mismatch, auth errors, etc. WITHOUT human inte
 """
 import json
 import logging
+import math
 import os
+import re
 from typing import Optional
 
 import anthropic
@@ -202,7 +204,6 @@ class TraderAgent:
         Autonomous bet placement with self-healing.
         Uses Claude to reason about failures and retry.
         """
-        import math
         api_key = os.getenv("ANTHROPIC_API_KEY","").strip().lstrip("=")
         if not api_key:
             # Fallback: try directly without LLM reasoning
@@ -263,6 +264,3 @@ class TraderAgent:
                 messages.append({"role": "user", "content": tool_results})
 
         return {"ok": False, "order_id": "", "message": "Max retries reached"}
-
-
-import re  # needed for regex in place_bet
