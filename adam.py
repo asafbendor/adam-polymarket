@@ -98,24 +98,34 @@ async def _binance_fallback(session: aiohttp.ClientSession) -> list[dict]:
         except Exception:
             continue
 
-        # Calculate direction and probability
-        above_words = ["above","exceed","over","higher","surpass","reach","close above",">"]
-        below_words = ["below","under","less than","drop below","fall below","<"]
+        # Determine if question asks "above" or "below" target
+        above_words = ["above","exceed","over","higher","surpass","reach","hit","close above",">","$"]
+        below_words = ["below","under","less than","drop below","fall below","<","dip","crash"]
         q_low = q.lower()
-        direction = "above" if any(w in q_low for w in above_words) else "below"
+        asks_above = any(w in q_low for w in above_words)
 
-        margin = (current - target)/target if direction=="above" else (target - current)/target
+        # margin = how far current is FROM target (positive = current is above target)
+        if asks_above:
+            margin = (current - target) / target
+            # current >> target → YES very likely
+            if margin >= 0.20:   bet_dir, prob, mp, token_id = "YES", 0.93, m["yes_price"], m["yes_token_id"]
+            elif margin >= 0.12: bet_dir, prob, mp, token_id = "YES", 0.87, m["yes_price"], m["yes_token_id"]
+            elif margin >= 0.06: bet_dir, prob, mp, token_id = "YES", 0.78, m["yes_price"], m["yes_token_id"]
+            # current << target → NO very likely (needs big gain, unlikely)
+            elif margin <= -0.30: bet_dir, prob, mp, token_id = "NO", 0.92, m["no_price"], m["no_token_id"]
+            elif margin <= -0.20: bet_dir, prob, mp, token_id = "NO", 0.85, m["no_price"], m["no_token_id"]
+            elif margin <= -0.12: bet_dir, prob, mp, token_id = "NO", 0.78, m["no_price"], m["no_token_id"]
+            else: continue
+        else:  # asks "below"
+            margin = (target - current) / target
+            if margin >= 0.20:   bet_dir, prob, mp, token_id = "YES", 0.93, m["yes_price"], m["yes_token_id"]
+            elif margin >= 0.12: bet_dir, prob, mp, token_id = "YES", 0.87, m["yes_price"], m["yes_token_id"]
+            elif margin >= 0.06: bet_dir, prob, mp, token_id = "YES", 0.78, m["yes_price"], m["yes_token_id"]
+            elif margin <= -0.30: bet_dir, prob, mp, token_id = "NO", 0.92, m["no_price"], m["no_token_id"]
+            elif margin <= -0.20: bet_dir, prob, mp, token_id = "NO", 0.85, m["no_price"], m["no_token_id"]
+            else: continue
 
-        if margin >= 0.20: prob = 0.93
-        elif margin >= 0.12: prob = 0.87
-        elif margin >= 0.06: prob = 0.78
-        else: continue  # not enough margin
-
-        mp = m["yes_price"] if direction=="above" else m["no_price"]
-        bet_dir = "YES" if direction=="above" else "NO"
-        token_id = m["yes_token_id"] if bet_dir=="YES" else m["no_token_id"]
         edge = prob - mp
-
         if edge < 0.05: continue
 
         opps.append({
@@ -281,6 +291,10 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
 async def main():
     memory.init()
     state.init(DB)
+    # Clear stale memory entries that were written when BTC was at different price
+    memory.remember("scout", "bitcoin_price_markets_lesson",
+        "UPDATED: BTC at $104k. Markets asking 'hit $150k?' need +44% - BET NO. "
+        "Markets asking 'above $80k?' need -23% drop - BET YES. Use Binance fallback for crypto.")
     trader = TraderAgent()
 
     try:
