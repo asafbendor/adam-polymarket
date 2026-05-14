@@ -295,19 +295,25 @@ async def main():
 
     connector = aiohttp.TCPConnector(limit=10)
     async with aiohttp.ClientSession(connector=connector) as session:
-        try:
-            await run_cycle(session, trader)
-        except Exception as e:
-            logger.error(f"First cycle: {e}")
-            await telegram.send(f"<b>First cycle error:</b> {e}")
+        consecutive_failures = 0
 
         while True:
-            await asyncio.sleep(SCAN_EVERY)
             try:
                 await run_cycle(session, trader)
+                consecutive_failures = 0
             except Exception as e:
-                logger.error(f"Cycle error: {e}")
-                await telegram.send(f"<b>Adam error:</b> {e}")
+                consecutive_failures += 1
+                logger.error(f"Cycle error #{consecutive_failures}: {e}")
+                state.log("ERROR", f"Cycle error: {e}", DB)
+                await telegram.send(f"<b>Adam error #{consecutive_failures}:</b> {e}")
+
+            # Retry quickly after failures, normal interval when healthy
+            if consecutive_failures > 0:
+                retry_in = min(60 * consecutive_failures, 300)  # 1min, 2min, 3min... max 5min
+                logger.info(f"Retrying in {retry_in}s (failure #{consecutive_failures})")
+                await asyncio.sleep(retry_in)
+            else:
+                await asyncio.sleep(SCAN_EVERY)
 
 
 if __name__ == "__main__":

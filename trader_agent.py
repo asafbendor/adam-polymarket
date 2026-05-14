@@ -94,9 +94,18 @@ class TraderAgent:
         self._key   = os.getenv("POLYMARKET_PRIVATE_KEY","").strip().lstrip("=")
         self._proxy = os.getenv("POLYMARKET_PROXY_ADDRESS","").strip().lstrip("=")
         self._client = None
-        # Try sig_type=1 (POLY_PROXY for V2), fallback to 0 (EOA)
-        if not self._init_client(sig_type=1, use_creds=True):
-            self._init_client(sig_type=0, use_creds=True)
+        self._working_config = None  # stores what actually worked
+        # Try all combinations until one works
+        for sig_type in [0, 1, 2]:
+            for use_creds in [False, True]:
+                if self._init_client(sig_type=sig_type, use_creds=use_creds):
+                    self._working_config = {"sig_type": sig_type, "use_creds": use_creds}
+                    memory.remember("trader", "working_sig_type", str(sig_type))
+                    memory.remember("trader", "working_use_creds", str(use_creds))
+                    logger.warning(f"Trader init OK: sig_type={sig_type} use_creds={use_creds}")
+                    break
+            if self._working_config:
+                break
 
     def _init_client(self, sig_type: int = 0, use_creds: bool = True):
         try:
