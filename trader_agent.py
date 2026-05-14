@@ -22,31 +22,64 @@ class TraderAgent:
         self._init()
 
     def _init(self):
+        """
+        Hybrid init:
+        - Old client (0.34.6) derives API credentials (auth) - this works
+        - V2 client places orders with correct EIP-712 version "2" - fixes order_version_mismatch
+        - Credentials from old client are passed to V2 client
+        """
+        if not self._key or not self._proxy:
+            logger.error("Missing POLYMARKET credentials")
+            return
+
+        # Step 1: derive credentials using old client (proven to work)
+        creds = None
         try:
-            from py_clob_client.client import ClobClient
-            from py_clob_client.constants import POLYGON
-
-            if not self._key:
-                logger.error("POLYMARKET_PRIVATE_KEY not set")
-                return
-            if not self._proxy:
-                logger.error("POLYMARKET_PROXY_ADDRESS not set")
-                return
-
-            self._client = ClobClient(
+            from py_clob_client.client import ClobClient as OldClient
+            from py_clob_client.constants import POLYGON as OLD_POLYGON
+            old = OldClient(
                 host="https://clob.polymarket.com",
-                key=self._key,
-                chain_id=POLYGON,
-                signature_type=2,
+                key=self._key, chain_id=OLD_POLYGON,
+                signature_type=2, funder=self._proxy,
+            )
+            creds = old.create_or_derive_api_creds()
+            logger.warning(f"Creds from old client OK: {getattr(creds,'api_key','?')[:8]}...")
+        except Exception as e:
+            logger.error(f"Old client creds failed: {e}")
+            memory.remember("trader", "creds_error", str(e))
+            return
+
+        # Step 2: init V2 client for order placement (correct EIP-712 v2 signing)
+        try:
+            from py_clob_client_v2.client import ClobClient as V2Client
+            from py_clob_client_v2.constants import POLYGON as V2_POLYGON
+            self._client = V2Client(
+                host="https://clob.polymarket.com",
+                key=self._key, chain_id=V2_POLYGON,
+                signature_type=2,   # proxy wallet - same as old client
                 funder=self._proxy,
             )
-            creds = self._client.create_or_derive_api_creds()
+            # Set credentials derived by old client
             self._client.set_api_creds(creds)
-            logger.warning(f"Trader ready | api_key={getattr(creds,'api_key','?')[:8]}...")
-            memory.remember("trader", "status", "initialized OK with py-clob-client 0.34.6")
+            logger.warning("V2 client init OK with old credentials")
+            memory.remember("trader", "status", "V2 client + old credentials hybrid")
         except Exception as e:
-            logger.error(f"Trader init failed: {e}")
-            memory.remember("trader", "init_error", str(e))
+            logger.error(f"V2 client init failed: {e}")
+            # Fallback: try V2 with sig_type=0
+            try:
+                from py_clob_client_v2.client import ClobClient as V2Client
+                from py_clob_client_v2.constants import POLYGON as V2_POLYGON
+                self._client = V2Client(
+                    host="https://clob.polymarket.com",
+                    key=self._key, chain_id=V2_POLYGON,
+                    signature_type=0, funder=self._proxy,
+                )
+                self._client.set_api_creds(creds)
+                logger.warning("V2 client init OK (sig_type=0 fallback)")
+                memory.remember("trader", "status", "V2 sig_type=0 fallback")
+            except Exception as e2:
+                logger.error(f"V2 fallback also failed: {e2}")
+                memory.remember("trader", "init_error", str(e2))
 
     def place_bet(self, token_id: str, market_price: float,
                   bet_size: float = 1.0, neg_risk: bool = False,
@@ -76,14 +109,16 @@ class TraderAgent:
             shares = round(shares + 0.01, 2)
 
         try:
-            from py_clob_client.clob_types import OrderArgs
-
-            order_args = OrderArgs(
-                token_id=token_id,
-                price=limit_price,
-                size=shares,
-                side="BUY",
-            )
+            # Use V2 OrderArgs for correct EIP-712 version "2" signing
+            try:
+                from py_clob_client_v2.clob_types import OrderArgs
+                from py_clob_client_v2.order_builder.constants import BUY
+                order_args = OrderArgs(token_id=token_id, price=limit_price,
+                                       size=shares, side=BUY)
+            except Exception:
+                from py_clob_client.clob_types import OrderArgs
+                order_args = OrderArgs(token_id=token_id, price=limit_price,
+                                       size=shares, side="BUY")
 
             resp = self._client.create_and_post_order(order_args)
             logger.warning(f"[LIVE] Response: {repr(resp)[:300]}")
