@@ -98,33 +98,47 @@ async def _binance_fallback(session: aiohttp.ClientSession) -> list[dict]:
         except Exception:
             continue
 
-        # Determine if question asks "above" or "below" target
-        above_words = ["above","exceed","over","higher","surpass","reach","hit","close above",">","$"]
-        below_words = ["below","under","less than","drop below","fall below","<","dip","crash"]
         q_low = q.lower()
-        asks_above = any(w in q_low for w in above_words)
 
-        # margin = how far current is FROM target (positive = current is above target)
-        if asks_above:
-            margin = (current - target) / target
-            # current >> target → YES very likely
-            if margin >= 0.20:   bet_dir, prob, mp, token_id = "YES", 0.93, m["yes_price"], m["yes_token_id"]
-            elif margin >= 0.12: bet_dir, prob, mp, token_id = "YES", 0.87, m["yes_price"], m["yes_token_id"]
-            elif margin >= 0.06: bet_dir, prob, mp, token_id = "YES", 0.78, m["yes_price"], m["yes_token_id"]
-            # current << target → NO very likely (needs big gain, unlikely)
-            elif margin <= -0.30: bet_dir, prob, mp, token_id = "NO", 0.92, m["no_price"], m["no_token_id"]
-            elif margin <= -0.20: bet_dir, prob, mp, token_id = "NO", 0.85, m["no_price"], m["no_token_id"]
-            elif margin <= -0.12: bet_dir, prob, mp, token_id = "NO", 0.78, m["no_price"], m["no_token_id"]
-            else: continue
-        else:  # asks "below"
-            margin = (target - current) / target
-            if margin >= 0.20:   bet_dir, prob, mp, token_id = "YES", 0.93, m["yes_price"], m["yes_token_id"]
-            elif margin >= 0.12: bet_dir, prob, mp, token_id = "YES", 0.87, m["yes_price"], m["yes_token_id"]
-            elif margin >= 0.06: bet_dir, prob, mp, token_id = "YES", 0.78, m["yes_price"], m["yes_token_id"]
-            elif margin <= -0.30: bet_dir, prob, mp, token_id = "NO", 0.92, m["no_price"], m["no_token_id"]
-            elif margin <= -0.20: bet_dir, prob, mp, token_id = "NO", 0.85, m["no_price"], m["no_token_id"]
-            else: continue
+        # "dip/fall/crash/drop to X" = asks if price goes DOWN to X
+        # "above/exceed/over/stay above X" = asks if price stays ABOVE X
+        # "hit/reach X" = asks if price goes UP to X (when X > current)
+        going_down_words = ["dip", "fall", "drop", "crash", "below", "under",
+                            "less than", "dip to", "fall to", "drop to"]
+        going_up_words   = ["above", "exceed", "over", "higher", "surpass",
+                            "stay above", "close above", "end above", "hit",
+                            "reach", "pass", "break"]
 
+        is_going_down = any(w in q_low for w in going_down_words)
+        is_going_up   = any(w in q_low for w in going_up_words)
+
+        # For "going down" questions: YES = price drops to target
+        #   current >> target → needs big DROP → P(YES) is LOW → BET NO
+        #   current << target → price already below target → P(YES) HIGH → BET YES
+        # For "going up" questions: YES = price rises to target
+        #   current >> target → already above target → P(YES) HIGH → BET YES
+        #   current << target → needs big RISE → P(YES) LOW → BET NO
+
+        if is_going_down and not is_going_up:
+            gap = (current - target) / current  # positive = current is above target
+            if gap >= 0.30:    bet_dir, prob, mp, tid = "NO",  0.93, m["no_price"],  m["no_token_id"]
+            elif gap >= 0.20:  bet_dir, prob, mp, tid = "NO",  0.87, m["no_price"],  m["no_token_id"]
+            elif gap >= 0.12:  bet_dir, prob, mp, tid = "NO",  0.78, m["no_price"],  m["no_token_id"]
+            elif gap <= -0.20: bet_dir, prob, mp, tid = "YES", 0.87, m["yes_price"], m["yes_token_id"]
+            else: continue
+        elif is_going_up or (not is_going_down):
+            gap = (current - target) / target   # positive = current already above target
+            if gap >= 0.20:    bet_dir, prob, mp, tid = "YES", 0.93, m["yes_price"], m["yes_token_id"]
+            elif gap >= 0.12:  bet_dir, prob, mp, tid = "YES", 0.87, m["yes_price"], m["yes_token_id"]
+            elif gap >= 0.06:  bet_dir, prob, mp, tid = "YES", 0.78, m["yes_price"], m["yes_token_id"]
+            elif gap <= -0.30: bet_dir, prob, mp, tid = "NO",  0.93, m["no_price"],  m["no_token_id"]
+            elif gap <= -0.20: bet_dir, prob, mp, tid = "NO",  0.87, m["no_price"],  m["no_token_id"]
+            elif gap <= -0.12: bet_dir, prob, mp, tid = "NO",  0.78, m["no_price"],  m["no_token_id"]
+            else: continue
+        else:
+            continue
+
+        token_id = tid
         edge = prob - mp
         if edge < 0.05: continue
 
