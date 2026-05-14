@@ -266,10 +266,7 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
             err = result.get("message","")
             logger.warning(f"Bet failed: {err} | {opp.get('question','')[:60]}")
             state.log("WARNING", f"Bet failed: {err}", DB)
-            await telegram.send(
-                f"<b>Bet failed</b>\n{opp.get('question','')[:100]}\n"
-                f"Error: {err[:200]}\nTrader is self-healing..."
-            )
+            # Silent - no Telegram on failures, only on successful bets and resolutions
 
 
 async def main():
@@ -305,7 +302,7 @@ async def main():
                 consecutive_failures += 1
                 logger.error(f"Cycle error #{consecutive_failures}: {e}")
                 state.log("ERROR", f"Cycle error: {e}", DB)
-                await telegram.send(f"<b>Adam error #{consecutive_failures}:</b> {e}")
+                # Silent - no Telegram on errors, only on bets and resolutions
 
             # Retry quickly after failures, normal interval when healthy
             if consecutive_failures > 0:
