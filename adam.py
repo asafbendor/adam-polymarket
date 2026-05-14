@@ -243,6 +243,8 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
                 market_price = opp.get("market_price", 0.5),
                 bet_size     = BET_SIZE,
                 neg_risk     = opp.get("neg_risk", False),
+                condition_id = opp.get("condition_id",""),
+                direction    = opp.get("direction","YES"),
             )
         )
 

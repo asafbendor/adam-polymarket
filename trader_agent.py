@@ -1,92 +1,17 @@
 """
-Trader Agent - autonomous execution agent with self-healing capabilities.
-
-When an order fails, Trader:
-1. Reads the error message
-2. Checks its memory for known fixes
-3. Inspects available client methods
-4. Tries different approaches
-5. Remembers what worked for next time
-
-This means it fixes order_version_mismatch, auth errors, etc. WITHOUT human intervention.
+Trader Agent - places orders using the proven py-clob-client 0.34.6.
+This exact pattern worked in the old polymarket-bot project.
+No V2, no extras - just what works.
 """
-import json
+import asyncio
 import logging
 import math
 import os
-import re
 from typing import Optional
-
-import anthropic
 
 import memory
 
 logger = logging.getLogger("trader")
-
-TOOLS = [
-    {
-        "name": "inspect_client",
-        "description": "List all available methods on the Polymarket CLOB client. Use when unsure about API.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
-    {
-        "name": "try_place_order",
-        "description": "Attempt to place a bet order with given parameters.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "token_id":    {"type": "string"},
-                "price":       {"type": "number", "description": "Limit price 0.01-0.97"},
-                "size":        {"type": "number", "description": "Number of shares"},
-                "neg_risk":    {"type": "boolean", "default": False},
-                "sig_type":    {"type": "integer", "description": "0=EOA, 1=PROXY", "default": 0},
-                "use_creds":   {"type": "boolean", "description": "Whether to set API creds", "default": True},
-            },
-            "required": ["token_id", "price", "size"],
-        },
-    },
-    {
-        "name": "recall_fixes",
-        "description": "Recall known fixes for order errors from memory.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
-    {
-        "name": "remember_fix",
-        "description": "Store a successful fix for future use.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "error_pattern": {"type": "string", "description": "The error that was fixed"},
-                "fix":           {"type": "string", "description": "What fixed it"},
-            },
-            "required": ["error_pattern", "fix"],
-        },
-    },
-    {
-        "name": "get_balance",
-        "description": "Check USDC balance in the Polymarket account.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
-]
-
-SYSTEM = """You are Trader - an autonomous order execution agent for Polymarket.
-
-Your job: place a bet order. If it fails, diagnose and fix it yourself.
-
-Process:
-1. Call recall_fixes to remember known solutions from past errors
-2. Call inspect_client to see available methods if unsure
-3. Call try_place_order with appropriate parameters
-4. If order fails, analyze the error, adjust parameters, and retry
-5. If you find a fix, call remember_fix to save it for next time
-
-Common issues and their fixes:
-- "create_or_derive_api_creds not found" -> try other method names, or set use_creds=false
-- "order_version_mismatch" -> try neg_risk=true, or try different sig_type
-- "unauthorized" -> api credentials issue, try use_creds=false (V2 may auto-auth)
-- "invalid price" -> round price to 2 decimal places
-
-Return JSON: {"success": true/false, "order_id": "...", "message": "..."}"""
 
 
 class TraderAgent:
@@ -94,225 +19,130 @@ class TraderAgent:
         self._key   = os.getenv("POLYMARKET_PRIVATE_KEY","").strip().lstrip("=")
         self._proxy = os.getenv("POLYMARKET_PROXY_ADDRESS","").strip().lstrip("=")
         self._client = None
-        # Initialize with sig_type=0 and credentials from old client
-        self._init_client(sig_type=0, use_creds=True)
-        memory.remember("trader", "init_strategy", "sig_type=0 + old client creds derivation")
+        self._init()
 
-    def _get_creds_via_old_client(self):
-        """Use py-clob-client v0.34.6 to derive API credentials (known working)."""
+    def _init(self):
         try:
-            from py_clob_client.client import ClobClient as OldClient
-            from py_clob_client.constants import POLYGON as OLD_POLYGON
-            old = OldClient(
-                host="https://clob.polymarket.com",
-                key=self._key,
-                chain_id=OLD_POLYGON,
-                signature_type=2,
-                funder=self._proxy,
-            )
-            creds = old.create_or_derive_api_creds()
-            logger.warning(f"Creds derived via old client: {getattr(creds,'api_key','?')[:8]}...")
-            return creds
-        except Exception as e:
-            logger.warning(f"Old client creds failed: {e}")
-            return None
+            from py_clob_client.client import ClobClient
+            from py_clob_client.constants import POLYGON
 
-    def _init_client(self, sig_type: int = 0, use_creds: bool = True):
-        try:
-            from py_clob_client_v2.client import ClobClient
-            from py_clob_client_v2.constants import POLYGON
+            if not self._key:
+                logger.error("POLYMARKET_PRIVATE_KEY not set")
+                return
+            if not self._proxy:
+                logger.error("POLYMARKET_PROXY_ADDRESS not set")
+                return
+
             self._client = ClobClient(
                 host="https://clob.polymarket.com",
                 key=self._key,
                 chain_id=POLYGON,
-                signature_type=sig_type,
+                signature_type=2,
                 funder=self._proxy,
             )
-            if use_creds:
-                # First try V2 native methods
-                creds = None
-                for method in ["create_or_derive_api_creds","derive_api_creds",
-                               "get_or_create_api_creds"]:
-                    fn = getattr(self._client, method, None)
-                    if fn:
-                        try:
-                            creds = fn()
-                            if creds:
-                                logger.info(f"V2 creds via {method}")
-                                break
-                        except Exception as e:
-                            logger.debug(f"V2 {method}: {e}")
-
-                # Fallback: use old client to derive creds
-                if not creds:
-                    creds = self._get_creds_via_old_client()
-
-                if creds:
-                    try:
-                        self._client.set_api_creds(creds)
-                        logger.warning(f"Creds set on V2 client OK")
-                    except Exception as e:
-                        logger.warning(f"set_api_creds failed: {e}")
-                else:
-                    logger.warning("No creds available - orders will fail auth")
-
-            logger.warning(f"Client init OK with sig_type={sig_type}")
-            return True
+            creds = self._client.create_or_derive_api_creds()
+            self._client.set_api_creds(creds)
+            logger.warning(f"Trader ready | api_key={getattr(creds,'api_key','?')[:8]}...")
+            memory.remember("trader", "status", "initialized OK with py-clob-client 0.34.6")
         except Exception as e:
-            logger.warning(f"Client init failed sig_type={sig_type}: {e}")
-            return False
-
-    def _try_order(self, token_id: str, price: float, size: float,
-                   neg_risk: bool = False) -> dict:
-        if not self._client:
-            return {"ok": False, "error": "Client not initialized"}
-        try:
-            from py_clob_client_v2.clob_types import OrderArgs
-            from py_clob_client_v2.order_builder.constants import BUY
-            args = OrderArgs(token_id=token_id, price=round(price,2), size=size, side=BUY)
-
-            # py_clob_client_v2 expects an object with attributes, not a dict
-            options = None
-            for cls_name in ["PartialCreateOrderOptions", "CreateOrderOptions",
-                             "OrderOptions", "TradeParams"]:
-                try:
-                    mod = __import__("py_clob_client_v2.clob_types",
-                                     fromlist=[cls_name])
-                    cls = getattr(mod, cls_name, None)
-                    if cls:
-                        options = cls(tick_size="0.01", neg_risk=neg_risk)
-                        break
-                except Exception:
-                    continue
-            if options is None:
-                from types import SimpleNamespace
-                options = SimpleNamespace(tick_size="0.01", neg_risk=neg_risk)
-
-            resp = self._client.create_and_post_order(args, options)
-            order_id = ""
-            if isinstance(resp,dict):
-                order_id = (resp.get("orderID") or resp.get("order_id") or
-                            (resp.get("order") or {}).get("id") or "")
-            elif hasattr(resp,"order_id"):
-                order_id = resp.order_id or ""
-            return {"ok": True, "order_id": order_id, "response": repr(resp)[:200]}
-        except Exception as e:
-            return {"ok": False, "error": str(e), "error_type": type(e).__name__}
-
-    def _handle_tool(self, name: str, inp: dict) -> str:
-        if name == "inspect_client":
-            if not self._client:
-                return json.dumps({"error": "no client"})
-            methods = [m for m in dir(self._client) if not m.startswith("_")]
-            return json.dumps({"available_methods": methods})
-
-        if name == "try_place_order":
-            sig_type  = inp.get("sig_type", 0)
-            use_creds = inp.get("use_creds", True)
-            # Re-init client if parameters differ
-            self._init_client(sig_type=sig_type, use_creds=use_creds)
-            result = self._try_order(
-                token_id = inp["token_id"],
-                price    = inp["price"],
-                size     = inp["size"],
-                neg_risk = inp.get("neg_risk", False),
-            )
-            logger.info(f"try_place_order result: {result}")
-            memory.agent_log("trader", f"try_place_order: {result}")
-            return json.dumps(result)
-
-        if name == "recall_fixes":
-            fixes = memory.recall_all("trader")
-            return json.dumps(fixes if fixes else {"note": "No fixes stored yet"})
-
-        if name == "remember_fix":
-            memory.remember("trader", inp.get("error_pattern",""), inp.get("fix",""))
-            return json.dumps({"saved": True})
-
-        if name == "get_balance":
-            if not self._client:
-                return json.dumps({"error": "no client"})
-            try:
-                for call in [
-                    lambda: self._client.get_balance_allowance(params={"asset_type":0}),
-                    lambda: self._client.get_balance_allowance({"asset_type":0}),
-                    lambda: self._client.get_balance_allowance(),
-                ]:
-                    try:
-                        d = call()
-                        if d:
-                            raw = d.get("balance") or d.get("balance_usdc") or 0
-                            return json.dumps({"usdc": float(raw)/1_000_000})
-                    except Exception: continue
-            except Exception as e:
-                return json.dumps({"error": str(e)})
-            return json.dumps({"usdc": None})
-
-        return json.dumps({"error": f"unknown: {name}"})
+            logger.error(f"Trader init failed: {e}")
+            memory.remember("trader", "init_error", str(e))
 
     def place_bet(self, token_id: str, market_price: float,
-                  bet_size: float = 1.0, neg_risk: bool = False) -> dict:
-        """
-        Autonomous bet placement with self-healing.
-        Uses Claude to reason about failures and retry.
-        """
-        api_key = os.getenv("ANTHROPIC_API_KEY","").strip().lstrip("=")
-        if not api_key:
-            # Fallback: try directly without LLM reasoning
-            limit_price = round(min(market_price * 1.03, 0.97), 2)
-            shares = math.ceil(bet_size / limit_price * 100) / 100
-            while limit_price * shares < 1.0:
-                shares = round(shares + 0.01, 2)
-            return self._try_order(token_id, limit_price, shares, neg_risk)
+                  bet_size: float = 1.0, neg_risk: bool = False,
+                  condition_id: str = "", direction: str = "YES") -> dict:
+        if not self._client:
+            return {"ok": False, "order_id": "", "message": "Client not initialized"}
 
-        limit_price = round(min(market_price * 1.03, 0.97), 2)
+        limit_price = round(min(market_price * 1.03, 0.97), 4)
+
+        # Resolve real token_id from CLOB
+        try:
+            loop = asyncio.get_event_loop()
+            data = loop.run_until_complete(
+                asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._client.get_market(condition_id)
+                )
+            ) if condition_id else {}
+            for tok in (data.get("tokens") or []):
+                if str(tok.get("outcome","")).upper() == direction.upper():
+                    token_id = str(tok["token_id"])
+                    break
+        except Exception:
+            pass  # use token_id from Scout
+
         shares = math.ceil(bet_size / limit_price * 100) / 100
         while limit_price * shares < 1.0:
             shares = round(shares + 0.01, 2)
 
-        client   = anthropic.Anthropic(api_key=api_key)
-        messages = [{"role": "user", "content":
-            f"Place a BUY order with these parameters:\n"
-            f"token_id: {token_id}\n"
-            f"price: {limit_price}\n"
-            f"size: {shares}\n"
-            f"neg_risk: {neg_risk}\n\n"
-            f"Start by recalling any known fixes, then try placing the order. "
-            f"If it fails, diagnose and retry with adjusted parameters."}]
+        try:
+            from py_clob_client.clob_types import OrderArgs
 
-        for _ in range(6):
-            resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=2048,
-                system=SYSTEM,
-                tools=TOOLS,
-                messages=messages,
+            order_args = OrderArgs(
+                token_id=token_id,
+                price=limit_price,
+                size=shares,
+                side="BUY",
             )
-            messages.append({"role": "assistant", "content": resp.content})
 
-            if resp.stop_reason == "end_turn":
-                for block in resp.content:
-                    if hasattr(block,"text"):
-                        m = re.search(r"\{.*\}", block.text, re.DOTALL)
-                        if m:
-                            try:
-                                result = json.loads(m.group(0))
-                                return {"ok": result.get("success",False),
-                                        "order_id": result.get("order_id",""),
-                                        "message": result.get("message","")}
-                            except Exception: pass
-                return {"ok": False, "order_id": "", "message": "No result from Trader"}
+            resp = self._client.create_and_post_order(order_args)
+            logger.warning(f"[LIVE] Response: {repr(resp)[:300]}")
 
-            if resp.stop_reason == "tool_use":
-                tool_results = []
-                for block in resp.content:
-                    if block.type == "tool_use":
-                        result = self._handle_tool(block.name, block.input)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
-                messages.append({"role": "user", "content": tool_results})
+            order_id = ""
+            if isinstance(resp, dict):
+                order_id = (
+                    resp.get("orderID") or resp.get("order_id") or
+                    (resp.get("order") or {}).get("id") or ""
+                )
+            elif hasattr(resp, "order_id"):
+                order_id = resp.order_id or ""
 
-        return {"ok": False, "order_id": "", "message": "Max retries reached"}
+            memory.remember("trader", "last_success",
+                            f"order_id={order_id} price={limit_price} shares={shares}")
+            memory.agent_log("trader", f"Order placed: {direction} {shares}sh @ {limit_price}")
+            return {"ok": True, "order_id": order_id, "limit_price": limit_price,
+                    "message": f"Order placed: {shares}sh @ {limit_price}"}
+
+        except Exception as e:
+            import traceback
+            msg = f"{type(e).__name__}: {e}"
+            logger.warning(f"Order failed: {msg}")
+            memory.remember("trader", f"last_error", msg[:200])
+            memory.agent_log("trader", f"Order failed: {msg[:150]}")
+            return {"ok": False, "order_id": "", "limit_price": limit_price, "message": msg}
+
+    def get_balance(self) -> Optional[float]:
+        if not self._client:
+            return None
+        try:
+            for call in [
+                lambda: self._client.get_balance_allowance(params={"asset_type": 0}),
+                lambda: self._client.get_balance_allowance({"asset_type": 0}),
+                lambda: self._client.get_balance_allowance(),
+            ]:
+                try:
+                    data = call()
+                    if data:
+                        raw = data.get("balance") or data.get("balance_usdc") or 0
+                        return float(raw) / 1_000_000
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return None
+
+    def get_order(self, order_id: str) -> dict:
+        if not self._client or not order_id:
+            return {}
+        try:
+            return self._client.get_order(order_id) or {}
+        except Exception:
+            return {}
+
+    def _handle_tool(self, name: str, inp: dict) -> str:
+        """Keep compatibility with adam.py balance check."""
+        import json
+        if name == "get_balance":
+            bal = self.get_balance()
+            return json.dumps({"usdc": bal})
+        return json.dumps({"error": f"unknown: {name}"})
