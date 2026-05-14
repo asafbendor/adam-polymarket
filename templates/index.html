@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Adam Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f1117;--card:#1a1d2e;--border:#2a2d3e;--text:#e2e8f0;--muted:#94a3b8;
+--green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--blue:#3b82f6;--accent:#6366f1}
+body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;font-size:14px}
+header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 24px;
+  display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:700} header h1 span{color:var(--accent)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);
+  margin-right:6px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.muted{color:var(--muted);font-size:12px}
+main{max-width:1400px;margin:0 auto;padding:24px}
+.budget-wrap{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:16px 20px;margin-bottom:24px}
+.budget-label{display:flex;justify-content:space-between;margin-bottom:8px;font-size:13px}
+.bar-bg{background:var(--border);border-radius:99px;height:8px;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--blue));
+  border-radius:99px;transition:width .5s}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:24px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 20px}
+.label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.val{font-size:24px;font-weight:700}.sub{color:var(--muted);font-size:12px;margin-top:4px}
+.green{color:var(--green)}.red{color:var(--red)}.blue{color:var(--blue)}
+.yellow{color:var(--yellow)}.purple{color:#a855f7}
+.section{margin-bottom:28px}
+.sec-title{font-size:13px;font-weight:600;margin-bottom:12px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.5px}
+.tbl-wrap{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:auto}
+table{width:100%;border-collapse:collapse}
+th{background:#1e2235;color:var(--muted);font-size:11px;text-transform:uppercase;
+  letter-spacing:.5px;padding:10px 14px;text-align:left;white-space:nowrap}
+td{padding:10px 14px;border-top:1px solid var(--border);font-size:13px;vertical-align:top}
+tr:hover td{background:rgba(99,102,241,.05)}
+.q{max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.reason{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  display:block;color:var(--muted);font-size:12px}
+.url{font-size:11px;color:var(--accent);text-decoration:none}
+.url:hover{text-decoration:underline}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;text-transform:uppercase}
+.b-pending{background:rgba(245,158,11,.15);color:var(--yellow)}
+.b-filled{background:rgba(59,130,246,.15);color:var(--blue)}
+.b-won{background:rgba(34,197,94,.15);color:var(--green)}
+.b-lost{background:rgba(239,68,68,.15);color:var(--red)}
+.b-cancelled{background:rgba(148,163,184,.1);color:var(--muted)}
+.b-yes{background:rgba(34,197,94,.15);color:var(--green)}
+.b-no{background:rgba(239,68,68,.15);color:var(--red)}
+.log-panel{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  max-height:280px;overflow-y:auto;font-family:monospace;font-size:12px}
+.log-row{padding:6px 14px;border-bottom:1px solid var(--border);display:grid;
+  grid-template-columns:170px 70px 1fr;gap:10px}
+.log-ts{color:var(--muted)}.log-INFO{color:var(--blue)}.log-WARNING{color:var(--yellow)}.log-ERROR{color:var(--red)}
+.log-msg{word-break:break-word}
+.empty{text-align:center;color:var(--muted);padding:32px}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:24px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Adam</span> Dashboard</h1>
+  <div style="display:flex;align-items:center;gap:16px">
+    <span id="clock" style="font-size:15px;font-weight:600"></span>
+    <span><span class="dot"></span><span id="refresh" class="muted">Loading...</span></span>
+  </div>
+</header>
+
+<main>
+  <div class="budget-wrap">
+    <div class="budget-label"><strong>Daily budget</strong><span id="budget-amounts"></span></div>
+    <div class="bar-bg"><div class="bar-fill" id="bar" style="width:0%"></div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Today P&L</div><div class="val" id="today-pnl">-</div></div>
+    <div class="card"><div class="label">Today bets</div><div class="val" id="today-bets">-</div><div class="sub" id="today-wl"></div></div>
+    <div class="card"><div class="label">All-time P&L</div><div class="val" id="at-pnl">-</div></div>
+    <div class="card"><div class="label">Win rate</div><div class="val" id="winrate">-</div></div>
+    <div class="card"><div class="label">Total bets</div><div class="val purple" id="total">-</div></div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">Recent bets</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Question</th><th>Direction</th><th>Price</th>
+          <th>Est. prob</th><th>Reason</th><th>Status</th><th>P&L</th><th>Ends</th>
+        </tr></thead>
+        <tbody id="bets"><tr><td colspan="8" class="empty">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">Log</div>
+    <div class="log-panel" id="log"><div class="empty">Loading...</div></div>
+  </div>
+</main>
+<footer>Auto-refreshes every 30s</footer>
+
+<script>
+function updateClock(){
+  const now=new Date();
+  document.getElementById('clock').textContent='🇮🇱 '
+    +now.toLocaleDateString('he-IL',{timeZone:'Asia/Jerusalem',day:'2-digit',month:'2-digit',year:'2-digit'})
+    +'  '+now.toLocaleTimeString('he-IL',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+updateClock(); setInterval(updateClock,1000);
+
+function sign(v){return v>=0?'+':'';}
+function pclass(v){return v>=0?'green':'red';}
+function pstr(v){if(v==null)return'-';const n=parseFloat(v);return isNaN(n)?'-':sign(n)+'$'+Math.abs(n).toFixed(2);}
+function fdate(s){if(!s)return'-';try{const d=new Date(s);return d.toLocaleDateString('en-GB',{timeZone:'Asia/Jerusalem',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});}catch{return s.slice(0,10);}}
+
+async function refresh(){
+  try{
+    const[s,b,l]=await Promise.all([fetch('/api/stats').then(r=>r.json()),fetch('/api/bets?limit=100').then(r=>r.json()),fetch('/api/log?limit=60').then(r=>r.json())]);
+    renderStats(s); renderBets(b.bets||[]); renderLog(l.log||[]);
+    document.getElementById('refresh').textContent='Updated: '+new Date().toLocaleTimeString('he-IL',{timeZone:'Asia/Jerusalem'});
+  }catch(e){document.getElementById('refresh').textContent='Update failed';}
+}
+
+function renderStats(s){
+  const t=s.today||{},a=s.alltime||{},bgt=s.daily_budget||10;
+  const spent=t.spent||0,pct=Math.min(100,spent/bgt*100).toFixed(1);
+  document.getElementById('bar').style.width=pct+'%';
+  document.getElementById('budget-amounts').textContent='$'+spent.toFixed(2)+' / $'+bgt.toFixed(2)+' ('+pct+'%)';
+  const tp=t.realized_pnl||0;
+  const tpEl=document.getElementById('today-pnl');
+  tpEl.textContent=sign(tp)+'$'+Math.abs(tp).toFixed(2); tpEl.className='val '+(tp>=0?'green':'red');
+  document.getElementById('today-bets').textContent=t.bets_placed||0;
+  document.getElementById('today-wl').textContent=(t.bets_won||0)+'W / '+(t.bets_lost||0)+'L';
+  const ap=a.total_pnl||0;
+  const apEl=document.getElementById('at-pnl');
+  apEl.textContent=sign(ap)+'$'+Math.abs(ap).toFixed(2); apEl.className='val '+(ap>=0?'green':'red');
+  const tw=a.total_won||0,tl=a.total_lost||0,tot=tw+tl;
+  const wr=tot>0?(tw/tot*100).toFixed(0)+'%':'-';
+  const wrEl=document.getElementById('winrate');
+  wrEl.textContent=wr; wrEl.className='val '+(tot>0&&tw/tot>=0.5?'green':'red');
+  document.getElementById('total').textContent=a.total_bets||0;
+}
+
+function renderBets(bets){
+  const tb=document.getElementById('bets');
+  if(!bets.length){tb.innerHTML='<tr><td colspan="8" class="empty">No bets yet</td></tr>';return;}
+  tb.innerHTML=bets.map(b=>{
+    const st=(b.status||'').toLowerCase();
+    const dir=(b.direction||'').toUpperCase();
+    const url=b.market_url?`<a class="url" href="${b.market_url}" target="_blank">View</a>`:'';
+    const q=b.question||'';
+    const pnl=b.pnl!=null?`<span class="${pclass(b.pnl)}">${pstr(b.pnl)}</span>`:'-';
+    return `<tr>
+      <td><span class="q" title="${q}">${q}</span>${url}</td>
+      <td><span class="badge b-${dir.toLowerCase()}">${dir}</span></td>
+      <td>${(b.market_price||0).toFixed(2)}</td>
+      <td>${((b.estimated_prob||0)*100).toFixed(0)}%</td>
+      <td><span class="reason" title="${b.reason||''}">${b.reason||'-'}</span></td>
+      <td><span class="badge b-${st}">${st}</span></td>
+      <td>${pnl}</td>
+      <td>${fdate(b.end_date)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderLog(log){
+  const p=document.getElementById('log');
+  if(!log.length){p.innerHTML='<div class="empty">No log entries</div>';return;}
+  p.innerHTML=log.map(e=>`<div class="log-row">
+    <span class="log-ts">${(e.ts||'').replace('T',' ').slice(0,19)}</span>
+    <span class="log-${e.level||'INFO'}">${e.level||'INFO'}</span>
+    <span class="log-msg">${(e.message||'').replace(/</g,'&lt;')}</span>
+  </div>`).join('');
+}
+
+refresh(); setInterval(refresh,30000);
+</script>
+</body>
+</html>
