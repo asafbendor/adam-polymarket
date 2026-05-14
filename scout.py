@@ -35,29 +35,31 @@ _TICKERS = {
 
 SCOUT_SYSTEM = """You are Adam's Scout - a prediction market analyst for Polymarket.
 
-Your job: review markets and find clear betting opportunities within 1-7 days.
+Your job: find betting opportunities. Be PROACTIVE - find at least 2-3 bets per scan if possible.
 
-Use fetch_markets to get a list of active markets.
-For crypto price markets, use get_binance_price to compare current price vs target.
+Steps:
+1. Call fetch_markets to get available markets
+2. For crypto price markets ("Will BTC/ETH be above/below $X"), call get_binance_price to compare
+3. Return ALL markets where your confidence exceeds 60% AND the market price differs by 5%+
 
-Criteria for a GOOD bet:
-- You have strong confidence (>72% probability)
-- The market price differs from your estimate by at least 6%
-- The market resolves within 7 days
+Examples of good bets:
+- BTC is at $104,000. Market asks "Will BTC be above $80,000?" priced at 0.88.
+  Your estimate: 97%. Edge: 9%. BET YES.
+- ETH is at $2,500. Market asks "Will ETH exceed $3,500?" priced at 0.15.
+  Your estimate: 8%. Edge: 7%. BET NO.
 
-For each opportunity return:
-{
+Return a JSON array (even just 1-2 items is fine):
+[{
   "condition_id": "...",
   "question": "...",
   "direction": "YES" or "NO",
   "token_id": "...",
   "market_price": 0.XX,
   "estimated_prob": 0.XX,
-  "reason": "one sentence explanation"
-}
+  "reason": "one sentence with data"
+}]
 
-Return a JSON array of opportunities. If none found, return [].
-Only include bets you are genuinely confident about."""
+If truly no opportunities, return []. But look hard - 149 markets were found."""
 
 
 def _parse_tokens(raw: dict) -> tuple[Optional[str], float, Optional[str], float]:
@@ -176,7 +178,7 @@ async def _handle_tool(name: str, inp: dict,
             markets_cache.extend(await _fetch_markets(session))
         # Return a compact summary for Claude
         summary = []
-        for m in markets_cache[:60]:   # limit to 60 so prompt stays small
+        for m in markets_cache[:30]:   # limit to 30 for focused analysis
             summary.append({
                 "condition_id": m["condition_id"],
                 "question":     m["question"],

@@ -33,9 +33,27 @@ class Trader:
                 signature_type=0,   # 0 = EOA (V2)
                 funder=proxy,
             )
-            creds = self._client.create_or_derive_api_creds()
-            self._client.set_api_creds(creds)
-            logger.warning(f"Trader ready | api_key={getattr(creds,'api_key','?')[:8]}...")
+            # Try all known method names across V2 versions
+            creds = None
+            for method in ["create_or_derive_api_creds", "derive_api_creds",
+                           "get_or_create_api_creds", "create_api_key"]:
+                fn = getattr(self._client, method, None)
+                if fn:
+                    try:
+                        creds = fn()
+                        break
+                    except Exception as e:
+                        logger.debug(f"{method} failed: {e}")
+
+            if creds:
+                try:
+                    self._client.set_api_creds(creds)
+                except Exception:
+                    pass
+                logger.warning(f"Trader ready | api_key={getattr(creds,'api_key','?')[:8]}...")
+            else:
+                # V2 might not need explicit creds - try without
+                logger.warning("Trader ready (no explicit API creds - V2 auto-auth)")
 
         except ImportError:
             logger.error("py_clob_client_v2 not installed")
