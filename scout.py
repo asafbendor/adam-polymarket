@@ -42,11 +42,10 @@ Steps:
 2. For crypto price markets ("Will BTC/ETH be above/below $X"), call get_binance_price to compare
 3. Return ALL markets where your confidence exceeds 60% AND the market price differs by 5%+
 
-Examples of good bets:
-- BTC is at $104,000. Market asks "Will BTC be above $80,000?" priced at 0.88.
-  Your estimate: 97%. Edge: 9%. BET YES.
-- ETH is at $2,500. Market asks "Will ETH exceed $3,500?" priced at 0.15.
-  Your estimate: 8%. Edge: 7%. BET NO.
+Examples of good bets (markets can be up to 30 days away):
+- BTC=$104k. "Will Bitcoin hit $150k by June 30?" priced at 0.35 → needs +44% gain → est 15% → BET NO (edge 20%)
+- BTC=$104k. "Will Bitcoin stay above $80k through May?" priced at 0.88 → needs -23% drop → est 96% → BET YES (edge 8%)
+- ETH=$2500. "Will ETH reach $5k by July?" priced at 0.12 → needs +100% → est 5% → BET NO (edge 7%)
 
 Return a JSON array (even just 1-2 items is fine):
 [{
@@ -122,7 +121,7 @@ async def _fetch_markets(session: aiohttp.ClientSession) -> list[dict]:
                     except: continue
                 else: continue
                 hours = (dt - now).total_seconds() / 3600
-                if hours < 1 or hours > 168: continue
+                if hours < 1 or hours > 720: continue  # up to 30 days
             except: continue
 
             liq = float(raw.get("liquidityNum") or raw.get("liquidity") or 0)

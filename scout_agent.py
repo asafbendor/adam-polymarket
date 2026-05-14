@@ -79,7 +79,7 @@ TOOLS = [
 
 SYSTEM = """You are Scout - an autonomous prediction market research agent for Polymarket.
 
-Your mission: find profitable betting opportunities (markets resolving within 7 days).
+Your mission: find profitable betting opportunities (markets resolving within 30 days).
 
 Your process:
 1. Call recall_learnings to remember what worked before
@@ -270,7 +270,7 @@ async def _fetch_markets(session: aiohttp.ClientSession) -> list[dict]:
                     except: continue
                 else: continue
                 hours = (dt - now).total_seconds()/3600
-                if hours < 1 or hours > 168: continue
+                if hours < 1 or hours > 720: continue  # up to 30 days
             except: continue
 
             liq = float(raw.get("liquidityNum") or raw.get("liquidity") or 0)
