@@ -49,26 +49,22 @@ async def get_log(limit: int = 60):
 
 @app.get("/api/agents")
 async def get_agents():
-    import memory as mem
-    return JSONResponse({
-        "scout": {
-            "name":      "Scout Agent",
-            "role":      "Finds betting opportunities using Claude Haiku + Binance prices",
-            "learnings": mem.recall_all("scout"),
-            "log":       [dict(r) for r in __import__('sqlite3').connect(DB).execute(
-                "SELECT ts,message FROM agent_log WHERE agent='scout' ORDER BY id DESC LIMIT 20"
-            ).fetchall()],
-        },
-        "trader": {
-            "name":   "Trader Agent",
-            "role":   "Places orders via Polymarket CLOB V2, self-heals on errors",
-            "fixes":  mem.recall_all("trader"),
-            "log":    [dict(r) for r in __import__('sqlite3').connect(DB).execute(
-                "SELECT ts,message FROM agent_log WHERE agent='trader' ORDER BY id DESC LIMIT 20"
-            ).fetchall()],
-        },
-        "outcomes": mem.get_outcomes(10),
-    })
+    try:
+        import sqlite3 as _sq
+        with _sq.connect(DB) as c:
+            c.row_factory = _sq.Row
+            scout_log   = [dict(r) for r in c.execute("SELECT ts,message FROM agent_log WHERE agent='scout' ORDER BY id DESC LIMIT 20").fetchall()]
+            trader_log  = [dict(r) for r in c.execute("SELECT ts,message FROM agent_log WHERE agent='trader' ORDER BY id DESC LIMIT 20").fetchall()]
+            scout_mem   = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='scout'").fetchall()}
+            trader_mem  = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='trader'").fetchall()}
+            outcomes    = [dict(r) for r in c.execute("SELECT * FROM bet_outcomes ORDER BY id DESC LIMIT 10").fetchall()]
+        return JSONResponse({
+            "scout":  {"name": "Scout Agent",  "role": "Finds opportunities via Claude Haiku + Binance", "learnings": scout_mem,  "log": scout_log},
+            "trader": {"name": "Trader Agent", "role": "Places orders, self-heals on errors",            "fixes":     trader_mem, "log": trader_log},
+            "outcomes": outcomes,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e), "scout": {"learnings":{}, "log":[]}, "trader": {"fixes":{}, "log":[]}, "outcomes": []})
 
 
 @app.get("/api/status")

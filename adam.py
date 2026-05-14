@@ -201,8 +201,13 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
     # Fallback: if Scout found nothing, use direct Binance price comparison
     if not opps:
         logger.info("Scout found 0 via Claude - trying direct Binance fallback")
-        state.log("INFO", "Scout found 0, trying Binance fallback", DB)
+        state.log("INFO", "Scout (Claude) found 0, switching to Binance fallback", DB)
+        memory.remember("scout", "last_claude_result", "0 opportunities - fell back to Binance")
         opps = await _binance_fallback(session)
+        if opps:
+            memory.remember("scout", "binance_fallback_works", f"Found {len(opps)} via Binance on {state.today()}")
+        else:
+            memory.remember("scout", "last_zero_cycle", f"{state.today()} - both Claude and Binance found 0")
 
     state.log("INFO", f"Total opportunities: {len(opps)}", DB)
     if not opps:
@@ -266,7 +271,11 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
             err = result.get("message","")
             logger.warning(f"Bet failed: {err} | {opp.get('question','')[:60]}")
             state.log("WARNING", f"Bet failed: {err}", DB)
-            # Silent - no Telegram on failures, only on successful bets and resolutions
+            # Store failure in Trader memory so it learns
+            import hashlib as _h
+            key = "fail_" + _h.md5(err[:50].encode()).hexdigest()[:8]
+            memory.remember("trader", key, f"Error: {err[:200]} | market: {opp.get('question','')[:60]}")
+            memory.agent_log("trader", f"Bet failed: {err[:150]}")
 
 
 async def main():
