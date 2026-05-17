@@ -182,7 +182,7 @@ async def _binance_fallback(session: aiohttp.ClientSession) -> list[dict]:
             "token_id":       token_id,
             "market_price":   mp,
             "estimated_prob": prob,
-            "reason":         f"{sym.replace('USDT','')} at ${current:,.0f}, target ${target:,.0f}, margin {margin*100:.0f}%",
+            "reason":         f"{sym.replace('USDT','')} at ${current:,.0f}, target ${target:,.0f}, gap {gap*100:.0f}%",
             "neg_risk":       m["neg_risk"],
             "market_url":     m["market_url"],
             "end_date":       m["end_date"],
