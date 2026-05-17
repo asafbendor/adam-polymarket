@@ -251,6 +251,20 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
             bet.get("reason","")
         )
 
+        # Force explicit learning - don't rely on Claude choosing to call remember_learning
+        outcome_word = "WON" if won else "LOST"
+        sign_word = "+" if pnl >= 0 else ""
+        learning_key = f"outcome_{bet['condition_id'][:12]}"
+        learning_val = (
+            f"{outcome_word} {sign_word}${abs(pnl):.2f} | "
+            f"Q: {bet['question'][:80]} | "
+            f"Dir: {bet['direction']} @ {bet.get('market_price',0):.2f} | "
+            f"Est: {bet.get('estimated_prob',0):.0%} | "
+            f"Reason: {bet.get('reason','')[:80]}"
+        )
+        memory.remember("scout", learning_key, learning_val)
+        memory.agent_log("scout", f"Learned from {outcome_word}: {bet['question'][:60]}")
+
         sign  = "+" if pnl >= 0 else ""
         emoji = "WIN" if won else "LOSS"
         await telegram.send(
@@ -261,6 +275,19 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
     if budget_left < BET_SIZE:
         logger.info("Budget exhausted")
         return
+
+    # Inject past outcomes into Scout context before every run
+    recent_outcomes = memory.get_outcomes(10)
+    win_count  = sum(1 for o in recent_outcomes if o.get("outcome") == "won")
+    loss_count = sum(1 for o in recent_outcomes if o.get("outcome") == "lost")
+    if recent_outcomes:
+        memory.remember("scout", "recent_performance",
+            f"Last {len(recent_outcomes)} resolved bets: {win_count}W / {loss_count}L. "
+            f"Recent: " + " | ".join(
+                f"{o['outcome'].upper()} {o['direction']} on {o['question'][:40]}"
+                for o in recent_outcomes[:3]
+            )
+        )
 
     opps = await find_opportunities(session)
     memory.agent_log("adam", f"Scout returned {len(opps)} opportunities")
