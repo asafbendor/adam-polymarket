@@ -50,22 +50,24 @@ async def get_log(limit: int = 60):
 @app.get("/api/agents")
 async def get_agents():
     try:
-        import sqlite3 as _sq
-        with _sq.connect(DB) as c:
-            c.row_factory = _sq.Row
-            scout_log   = [dict(r) for r in c.execute("SELECT ts,message FROM agent_log WHERE agent='scout' ORDER BY id DESC LIMIT 20").fetchall()]
-            trader_log  = [dict(r) for r in c.execute("SELECT ts,message FROM agent_log WHERE agent='trader' ORDER BY id DESC LIMIT 20").fetchall()]
-            # Last 20 entries per agent (agents learn from ALL but dashboard shows last 20)
-            scout_mem   = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='scout' ORDER BY rowid DESC LIMIT 20").fetchall()}
-            trader_mem  = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='trader' ORDER BY rowid DESC LIMIT 20").fetchall()}
-            outcomes    = [dict(r) for r in c.execute("SELECT * FROM bet_outcomes ORDER BY id DESC LIMIT 10").fetchall()]
         return JSONResponse({
-            "scout":  {"name": "Scout Agent",  "role": "Finds opportunities via Claude Haiku + Binance", "learnings": scout_mem,  "log": scout_log},
-            "trader": {"name": "Trader Agent", "role": "Places orders, self-heals on errors",            "fixes":     trader_mem, "log": trader_log},
-            "outcomes": outcomes,
+            "scout":  {
+                "name": "Scout Agent",
+                "role": "Finds opportunities via Claude Haiku + Binance",
+                "learnings": memory.recall_all("scout"),
+                "log": memory.get_log_entries("scout", 20),
+            },
+            "trader": {
+                "name": "Trader Agent",
+                "role": "Places orders, self-heals on errors",
+                "fixes": memory.recall_all("trader"),
+                "log": memory.get_log_entries("trader", 20),
+            },
+            "outcomes": memory.get_outcomes(10),
         })
     except Exception as e:
-        return JSONResponse({"error": str(e), "scout": {"learnings":{}, "log":[]}, "trader": {"fixes":{}, "log":[]}, "outcomes": []})
+        return JSONResponse({"error": str(e), "scout": {"learnings":{}, "log":[]},
+                             "trader": {"fixes":{}, "log":[]}, "outcomes": []})
 
 
 @app.get("/api/status")
