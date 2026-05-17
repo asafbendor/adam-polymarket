@@ -6,8 +6,10 @@ import os
 import sqlite3
 from contextlib import contextmanager
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-USE_PG = bool(DATABASE_URL and "postgresql" in DATABASE_URL)
+# Railway provides "postgres://" but psycopg2 needs "postgresql://"
+_raw_url = os.getenv("DATABASE_URL", "")
+DATABASE_URL = _raw_url.replace("postgres://", "postgresql://", 1) if _raw_url.startswith("postgres://") else _raw_url
+USE_PG = bool(DATABASE_URL and DATABASE_URL.startswith("postgresql"))
 PH = "%s" if USE_PG else "?"   # placeholder char
 
 
