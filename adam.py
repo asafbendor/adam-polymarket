@@ -26,7 +26,6 @@ logger = logging.getLogger("adam")
 import memory
 import state
 import telegram
-from scout_agent import find_opportunities
 from trader_agent import TraderAgent
 
 DAILY_BUDGET  = float(os.getenv("DAILY_BUDGET", "10.0"))
@@ -340,19 +339,13 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
             )
         )
 
-    opps = await find_opportunities(session)
-    memory.agent_log("adam", f"Scout returned {len(opps)} opportunities")
-
-    # Fallback: if Scout found nothing, use direct Binance price comparison
-    if not opps:
-        logger.info("Scout found 0 via Claude - trying direct Binance fallback")
-        state.log("INFO", "Scout (Claude) found 0, switching to Binance fallback", DB)
-        memory.remember("scout", "last_claude_result", "0 opportunities - fell back to Binance")
-        opps = await _binance_fallback(session)
-        if opps:
-            memory.remember("scout", "binance_fallback_works", f"Found {len(opps)} via Binance on {state.today()}")
-        else:
-            memory.remember("scout", "last_zero_cycle", f"{state.today()} - both Claude and Binance found 0")
+    # Scout: pure Binance price comparison - no API calls, no cost
+    opps = await _binance_fallback(session)
+    memory.agent_log("adam", f"Scout (Binance) found {len(opps)} opportunities")
+    if opps:
+        memory.remember("scout", f"scan_{state.today()}", f"Found {len(opps)} via Binance")
+    else:
+        memory.remember("scout", "last_zero_cycle", f"{state.today()} - Binance found 0")
 
     state.log("INFO", f"Total opportunities: {len(opps)}", DB)
     if not opps:
