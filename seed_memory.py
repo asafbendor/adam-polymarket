@@ -65,6 +65,34 @@ SCOUT_LEARNINGS = {
         "Switch to 30-day window to find enough opportunities. "
         "Short-window (<7 days) favors speculative events, not data-backed bets."
     ),
+    # From actual log analysis (May 16-17 2026)
+    "scout_cycle_stats": (
+        "Actual log data: Scout scanned 94-170 markets per cycle (avg 135). "
+        "Found 3-6 opportunities per cycle (avg 3.66). "
+        "56 cycles completed in 27.5 hours. "
+        "Claude returned 0 frequently - Binance fallback activated often."
+    ),
+    "successful_market_types": (
+        "Markets that actually got matched (from log): "
+        "- IPL Cricket (Delhi Capitals win) - sports, got filled "
+        "- PGA Championship (Scottie Scheffler) - sports, got filled "
+        "- Bitcoin range markets ($74k-$85k) - crypto, mixed "
+        "- Short-term crypto price bets (same-day) - often failed due to balance "
+        "Sports markets with clear favorites show real execution success."
+    ),
+    "markets_to_avoid": (
+        "Markets that repeatedly failed or caused issues (from log): "
+        "- Iran airspace closure (geopolitical, no data) "
+        "- Bitcoin same-day price targets (too short, balance ran out) "
+        "- Markets with 5-contract minimum (need larger position than $1 budget allows) "
+        "- Markets with 404 errors (delisted markets - check freshness)"
+    ),
+    "claude_vs_binance": (
+        "From 56 cycles: Claude Scout found 0 opportunities in majority of cycles. "
+        "Binance fallback was the primary bet-finding mechanism. "
+        "Claude better for sports/geopolitical analysis when given specific context. "
+        "For crypto: always use Binance fallback - it's more reliable than Claude estimates."
+    ),
 }
 
 TRADER_LEARNINGS = {
@@ -89,7 +117,35 @@ TRADER_LEARNINGS = {
     "minimum_order_size": (
         "Polymarket minimum order size constraints exist on some markets. "
         "For low-price tokens (<$0.05), may need more shares to meet minimum. "
-        "Calculate: shares = ceil(bet_size / limit_price * 100) / 100, ensure price*shares >= $1."
+        "Calculate: shares = ceil(bet_size / limit_price * 100) / 100, ensure price*shares >= $1. "
+        "Some markets require minimum 5 contracts - skip if bet_size too small."
+    ),
+    # From actual log analysis
+    "execution_rate": (
+        "Actual execution rate from log: 11 matched out of 24 attempts = 46%. "
+        "Primary failure reason: insufficient USDC balance (30 balance errors). "
+        "Secondary: order size below minimum (6 errors). "
+        "Market 404 errors (3): market delisted between scan and order."
+    ),
+    "balance_management": (
+        "CRITICAL from log: Balance ran out mid-session. "
+        "Bot placed $176 USDC total when budget should be $10/day. "
+        "Root cause: SQLite DB reset wiped daily_spent counter, bot thought it had full budget. "
+        "Fix: Use PostgreSQL for persistent daily budget tracking. "
+        "Always check actual USDC balance before placing order, not just DB counter."
+    ),
+    "market_404_handling": (
+        "Some market IDs become invalid (404) between scan and order placement. "
+        "This happens when markets are delisted or IDs change. "
+        "Handle gracefully: if get_market returns 404, skip the bet and log it. "
+        "Do not retry 404 markets - they are truly gone."
+    ),
+    "successful_sports_bets": (
+        "Sports bets that actually got matched in log: "
+        "- Delhi Capitals (IPL) YES bet - matched successfully "
+        "- Scottie Scheffler (PGA) YES bet - matched successfully "
+        "Sports markets are more reliable for execution than crypto same-day bets. "
+        "Major tournament favorites with clear odds tend to have good liquidity."
     ),
 }
 
