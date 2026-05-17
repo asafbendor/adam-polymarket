@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import aiohttp
 from dotenv import load_dotenv
@@ -35,31 +36,63 @@ DB            = os.getenv("DB_PATH", "adam.db")
 GAMMA_BASE    = "https://gamma-api.polymarket.com"
 
 
+def _outcome_to_direction(outcome_name: str, outcomes: list) -> str:
+    """
+    Convert a raw outcome name to YES or NO.
+    Polymarket binary markets have outcomes named "Yes"/"No" OR descriptive names.
+    For descriptive names, YES = index 0 (the affirmative outcome).
+    """
+    n = outcome_name.strip().upper()
+    if n in ("YES", "Y", "TRUE"):
+        return "YES"
+    if n in ("NO", "N", "FALSE"):
+        return "NO"
+    # Descriptive outcome: check position in outcomes list
+    for i, o in enumerate(outcomes):
+        if str(o).strip().upper() == n:
+            return "YES" if i == 0 else "NO"
+    return n  # fallback - return raw
+
+
 async def _check_resolution(session: aiohttp.ClientSession, cid: str) -> tuple[bool, str]:
-    try:
-        async with session.get(f"{GAMMA_BASE}/markets",
-                               params={"conditionId": cid},
-                               timeout=aiohttp.ClientTimeout(total=12)) as r:
-            if r.status != 200: return False, ""
-            data = await r.json(content_type=None)
-        markets = data if isinstance(data,list) else [data]
-        for m in markets:
-            if not m.get("resolved") and not m.get("closed"): return False, ""
-            op = m.get("outcomePrices") or []
-            if isinstance(op,str):
-                try: op=json.loads(op)
-                except: op=[]
-            on = m.get("outcomes") or []
-            if isinstance(on,str):
-                try: on=json.loads(on)
-                except: on=[]
-            for i,price in enumerate(op):
-                if float(price) >= 0.99 and i < len(on):
-                    return True, str(on[i]).upper()
-            winner = (m.get("resolution") or m.get("winner") or "").upper()
-            if winner: return True, winner
-    except Exception as e:
-        logger.debug(f"Resolution check {cid}: {e}")
+    """Returns (resolved, direction_that_won) where direction is 'YES' or 'NO'."""
+    for params in [{"conditionId": cid}, {"condition_id": cid}]:
+        try:
+            async with session.get(f"{GAMMA_BASE}/markets", params=params,
+                                   timeout=aiohttp.ClientTimeout(total=12)) as r:
+                if r.status != 200: continue
+                data = await r.json(content_type=None)
+            markets = data if isinstance(data, list) else [data]
+            for m in markets:
+                if not m: continue
+                is_resolved = m.get("resolved") or m.get("closed") or False
+                if not is_resolved: continue
+
+                op = m.get("outcomePrices") or []
+                on = m.get("outcomes") or []
+                if isinstance(op, str):
+                    try: op = json.loads(op)
+                    except: op = []
+                if isinstance(on, str):
+                    try: on = json.loads(on)
+                    except: on = []
+
+                # Method 1: find outcome with price = 1.0
+                for i, price in enumerate(op):
+                    try:
+                        if float(price) >= 0.99 and i < len(on):
+                            return True, _outcome_to_direction(str(on[i]), on)
+                    except (ValueError, TypeError):
+                        continue
+
+                # Method 2: explicit resolution field
+                raw_winner = (m.get("resolution") or m.get("winner") or
+                              m.get("resolvedOutcome") or "")
+                if raw_winner:
+                    return True, _outcome_to_direction(str(raw_winner), on)
+
+        except Exception as e:
+            logger.debug(f"Resolution check {cid}: {e}")
     return False, ""
 
 
@@ -169,8 +202,18 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
     state.log("INFO", f"Cycle start | budget_left=${budget_left:.2f}", DB)
 
     # 1. Check resolved bets
+    now_iso = datetime.now(timezone.utc).isoformat()
     for bet in state.get_pending(DB):
+        # Force-check if end_date has passed (market must be resolved by now)
+        end = bet.get("end_date","")
+        past_end = bool(end and end < now_iso[:10])
         resolved, winner = await _check_resolution(session, bet["condition_id"])
+        if not resolved and past_end:
+            # Try again with a small delay - market might be delayed in resolving
+            await asyncio.sleep(1)
+            resolved, winner = await _check_resolution(session, bet["condition_id"])
+            if not resolved:
+                state.log("WARNING", f"Bet past end_date but unresolved: {bet['question'][:60]}", DB)
         if not resolved:
             if bet["status"] == "pending" and bet.get("order_id"):
                 try:

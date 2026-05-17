@@ -55,8 +55,9 @@ async def get_agents():
             c.row_factory = _sq.Row
             scout_log   = [dict(r) for r in c.execute("SELECT ts,message FROM agent_log WHERE agent='scout' ORDER BY id DESC LIMIT 20").fetchall()]
             trader_log  = [dict(r) for r in c.execute("SELECT ts,message FROM agent_log WHERE agent='trader' ORDER BY id DESC LIMIT 20").fetchall()]
-            scout_mem   = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='scout'").fetchall()}
-            trader_mem  = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='trader'").fetchall()}
+            # Last 20 entries per agent (agents learn from ALL but dashboard shows last 20)
+            scout_mem   = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='scout' ORDER BY rowid DESC LIMIT 20").fetchall()}
+            trader_mem  = {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM memory WHERE agent='trader' ORDER BY rowid DESC LIMIT 20").fetchall()}
             outcomes    = [dict(r) for r in c.execute("SELECT * FROM bet_outcomes ORDER BY id DESC LIMIT 10").fetchall()]
         return JSONResponse({
             "scout":  {"name": "Scout Agent",  "role": "Finds opportunities via Claude Haiku + Binance", "learnings": scout_mem,  "log": scout_log},
