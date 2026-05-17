@@ -96,6 +96,68 @@ async def _check_resolution(session: aiohttp.ClientSession, cid: str) -> tuple[b
     return False, ""
 
 
+def _classify_question(question: str) -> str:
+    """Classify a market question into a category for learning."""
+    q = question.lower()
+    if any(w in q for w in ["btc","bitcoin","eth","ethereum","sol","crypto","price"]):
+        return "crypto"
+    if any(w in q for w in ["iran","peace","war","ceasefire","nato","sanction","election","president","senate","congress","vote"]):
+        return "geopolitical"
+    if any(w in q for w in ["nba","nfl","mlb","nhl","soccer","football","tennis","golf","cricket","pga","ipl","win the","beat","championship"]):
+        return "sports"
+    if any(w in q for w in ["eurovision","oscar","grammy","award","box office","album","celebrity"]):
+        return "entertainment"
+    return "other"
+
+
+def _update_rules_from_outcome(bet: dict, won: bool, pnl: float):
+    """
+    Updates Scout's behavioral rules based on resolved bet outcome.
+    This is real learning - rules change behavior, not just store history.
+    """
+    question = bet.get("question", "")
+    category = _classify_question(question)
+    direction = bet.get("direction", "")
+    market_price = bet.get("market_price", 0.5)
+
+    # Load existing category stats
+    stats_key = f"category_stats_{category}"
+    existing = memory.recall("scout", stats_key) or "wins=0,losses=0,total_pnl=0.0"
+    try:
+        parts = dict(item.split("=") for item in existing.split(","))
+        wins   = int(parts.get("wins", 0))
+        losses = int(parts.get("losses", 0))
+        total_pnl = float(parts.get("total_pnl", 0))
+    except Exception:
+        wins = losses = 0; total_pnl = 0.0
+
+    if won: wins += 1
+    else:   losses += 1
+    total_pnl = round(total_pnl + pnl, 2)
+    total = wins + losses
+    win_rate = wins / total if total else 0
+
+    memory.remember("scout", stats_key,
+        f"wins={wins},losses={losses},total_pnl={total_pnl}")
+
+    # Update behavioral rule based on accumulated stats
+    rule_key = f"rule_{category}"
+    if total >= 3:  # enough data to form a rule
+        if win_rate >= 0.70:
+            rule = f"PRIORITIZE {category.upper()} bets - win rate {win_rate:.0%} over {total} bets, P&L {total_pnl:+.2f}"
+        elif win_rate <= 0.35:
+            rule = f"AVOID {category.upper()} bets - win rate only {win_rate:.0%} over {total} bets, P&L {total_pnl:+.2f}. Skip unless very strong signal."
+        else:
+            rule = f"NEUTRAL on {category.upper()} - win rate {win_rate:.0%} over {total} bets, P&L {total_pnl:+.2f}"
+        memory.remember("scout", rule_key, rule)
+        memory.agent_log("scout",
+            f"Rule updated [{category}]: {win_rate:.0%} WR ({wins}W/{losses}L) P&L={total_pnl:+.2f}")
+
+    # Record individual outcome
+    memory.agent_log("scout",
+        f"{'WIN' if won else 'LOSS'} {direction} on [{category}] {question[:60]} P&L={pnl:+.2f}")
+
+
 async def _binance_fallback(session: aiohttp.ClientSession) -> list[dict]:
     """Direct Binance price comparison - no Claude needed. Pure math."""
     from scout_agent import _fetch_markets, _TICKERS
@@ -251,19 +313,8 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
             bet.get("reason","")
         )
 
-        # Force explicit learning - don't rely on Claude choosing to call remember_learning
-        outcome_word = "WON" if won else "LOST"
-        sign_word = "+" if pnl >= 0 else ""
-        learning_key = f"outcome_{bet['condition_id'][:12]}"
-        learning_val = (
-            f"{outcome_word} {sign_word}${abs(pnl):.2f} | "
-            f"Q: {bet['question'][:80]} | "
-            f"Dir: {bet['direction']} @ {bet.get('market_price',0):.2f} | "
-            f"Est: {bet.get('estimated_prob',0):.0%} | "
-            f"Reason: {bet.get('reason','')[:80]}"
-        )
-        memory.remember("scout", learning_key, learning_val)
-        memory.agent_log("scout", f"Learned from {outcome_word}: {bet['question'][:60]}")
+        # Systematic learning - update behavioral rules based on outcomes
+        _update_rules_from_outcome(bet, won, pnl)
 
         sign  = "+" if pnl >= 0 else ""
         emoji = "WIN" if won else "LOSS"
