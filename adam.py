@@ -350,10 +350,16 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
 async def main():
     memory.init()
     state.init(DB)
-    # Clear stale memory entries that were written when BTC was at different price
-    memory.remember("scout", "bitcoin_price_markets_lesson",
-        "UPDATED: BTC at $104k. Markets asking 'hit $150k?' need +44% - BET NO. "
-        "Markets asking 'above $80k?' need -23% drop - BET YES. Use Binance fallback for crypto.")
+
+    # Auto-seed on first run (no learnings yet in DB)
+    if not memory.recall("scout", "btc_price_may_2026"):
+        try:
+            import seed_memory
+            seed_memory.seed_known()
+            state.log("INFO", "Memory seeded from week-1 learnings", DB)
+            logger.info("Memory seeded with week-1 learnings")
+        except Exception as e:
+            logger.warning(f"Seed failed (non-critical): {e}")
     trader = TraderAgent()
 
     try:
