@@ -27,6 +27,7 @@ import memory
 import state
 import telegram
 from trader_agent import TraderAgent
+from sports_scout import find_sports_opportunities
 
 DAILY_BUDGET  = float(os.getenv("DAILY_BUDGET", "10.0"))
 BET_SIZE      = float(os.getenv("BET_SIZE", "1.0"))
@@ -339,13 +340,18 @@ async def run_cycle(session: aiohttp.ClientSession, trader: TraderAgent):
             )
         )
 
-    # Scout: pure Binance price comparison - no API calls, no cost
-    opps = await _binance_fallback(session)
-    memory.agent_log("adam", f"Scout (Binance) found {len(opps)} opportunities")
-    if opps:
-        memory.remember("scout", f"scan_{state.today()}", f"Found {len(opps)} via Binance")
-    else:
-        memory.remember("scout", "last_zero_cycle", f"{state.today()} - Binance found 0")
+    # Scout: Binance (crypto) + ESPN (sports) - no API calls, no cost
+    from scout_agent import _fetch_markets
+    all_markets = await _fetch_markets(session)
+
+    crypto_opps = await _binance_fallback(session)
+    sports_opps = await find_sports_opportunities(all_markets, session)
+    opps = crypto_opps + sports_opps
+
+    memory.agent_log("adam", f"Scout found {len(opps)} ({len(crypto_opps)} crypto, {len(sports_opps)} sports)")
+    state.log("INFO", f"Scout: {len(crypto_opps)} crypto + {len(sports_opps)} sports = {len(opps)} total", DB)
+    if not opps:
+        memory.remember("scout", "last_zero_cycle", f"{state.today()} - 0 crypto, 0 sports")
 
     state.log("INFO", f"Total opportunities: {len(opps)}", DB)
     if not opps:
